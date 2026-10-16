@@ -1,0 +1,69 @@
+# 云端 macOS 编译 MikeCarRemote.ipa（无需本机有 Mac / Xcode）
+# 推送到 main 分支或在 Actions 页面手动 Run workflow 后，
+# 在该次运行页面底部 Artifacts 下载 MikeCarRemote-ipa（解压即为 .ipa）。
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Locate Xcode project (兼容上传时多套一层文件夹)
+        id: locate
+        run: |
+          PROJ_PATH=$(find . -name "MikeCarRemote.xcodeproj" -not -path "*/.*" | head -n 1)
+          if [ -z "$PROJ_PATH" ]; then
+            echo "::error::仓库里没找到 MikeCarRemote.xcodeproj，请确认工程已上传"
+            exit 1
+          fi
+          PROJ_DIR=$(dirname "$PROJ_PATH")
+          echo "proj_dir=$PROJ_DIR" >> "$GITHUB_OUTPUT"
+          echo "找到工程目录: $PROJ_DIR"
+
+      - name: Build app for iOS device (no signing)
+        working-directory: ${{ steps.locate.outputs.proj_dir }}
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project MikeCarRemote.xcodeproj \
+            -scheme MikeCarRemote \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$GITHUB_WORKSPACE/build" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build
+
+      - name: Package unsigned IPA
+        run: |
+          APP_PATH="build/Build/Products/Release-iphoneos/MikeCarRemote.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::未找到编译产物 $APP_PATH"
+            exit 1
+          fi
+          mkdir Payload
+          cp -r "$APP_PATH" Payload/
+          zip -qr MikeCarRemote-unsigned.ipa Payload
+          ls -lh MikeCarRemote-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MikeCarRemote-ipa
+          path: MikeCarRemote-unsigned.ipa
+          retention-days: 30
