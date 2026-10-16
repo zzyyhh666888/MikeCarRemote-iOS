@@ -35,8 +35,12 @@ jobs:
 
       - name: Build app for iOS device (no signing)
         working-directory: ${{ steps.locate.outputs.proj_dir }}
+        shell: bash
         run: |
           set -o pipefail
+          echo "===== 工程包含的 scheme ====="
+          xcodebuild -project MikeCarRemote.xcodeproj -list
+          echo "===== 开始编译 ====="
           xcodebuild \
             -project MikeCarRemote.xcodeproj \
             -scheme MikeCarRemote \
@@ -47,7 +51,25 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            clean build
+            clean build 2>&1 | tee "$GITHUB_WORKSPACE/xcodebuild.log"
+
+      - name: 打印错误摘要
+        if: failure()
+        shell: bash
+        run: |
+          echo "########## xcodebuild 错误行 ##########"
+          grep -nE "error:|fatal error:|build commands failed|does not contain|unable to open|not found" \
+            "$GITHUB_WORKSPACE/xcodebuild.log" | head -50 || true
+          echo "######################################"
+
+      - name: 失败时上传完整编译日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Package unsigned IPA
         run: |
