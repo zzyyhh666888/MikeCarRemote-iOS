@@ -91,8 +91,9 @@ struct ControlFrame {
 
         let signedChannels = [rudder, throttle, aileron, elevator, armX, armY, armZ]
         for (index, value) in signedChannels.enumerated() {
+            // 有符号 -128...127 映射到字节 0...255，128 为中点
             let clamped = max(-128, min(127, value))
-            bytes[index + 1] = UInt8(bitPattern: Int8(clamped + 128))
+            bytes[index + 1] = UInt8(clamped + 128)
         }
         bytes[8] = UInt8(max(0, min(255, claw)))
 

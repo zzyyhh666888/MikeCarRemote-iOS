@@ -49,7 +49,7 @@ struct ContentView: View {
         }
         .alert("蓝牙提示",
                isPresented: Binding(get: { ble.lastError != nil },
-                                    set: { if !$0 { ble.lastError = nil } })) {
+                                    set: { if !$0 { ble.clearError() } })) {
             Button("知道了", role: .cancel) {}
         } message: {
             Text(ble.lastError ?? "")

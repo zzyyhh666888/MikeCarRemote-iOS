@@ -104,6 +104,11 @@ final class BLEManager: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: work)
     }
 
+    /// 供界面清除错误提示
+    func clearError() {
+        lastError = nil
+    }
+
     func stopScan() {
         scanTimeoutWorkItem?.cancel()
         if central.isScanning { central.stopScan() }
@@ -147,7 +152,7 @@ final class BLEManager: NSObject, ObservableObject {
         var index = 0
         while index < data.count {
             let end = min(index + chunkSize, data.count)
-            peripheral.write(data.subdata(in: index..<end), for: tx, type: writeType)
+            peripheral.writeValue(data.subdata(in: index..<end), for: tx, type: writeType)
             index = end
         }
     }
