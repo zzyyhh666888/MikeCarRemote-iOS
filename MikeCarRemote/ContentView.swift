@@ -260,6 +260,16 @@ struct ContentView: View {
                 Text(ble.state == .ready ? "透传已就绪 · 40Hz" : "正在建立透传通道…")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                if ble.state == .ready {
+                    Text("TX: \(ble.txCharacteristicUUID ?? "无")\(ble.rxCharacteristicUUID.map { "  RX: \($0)" } ?? "")")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary.opacity(0.8))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                    Text("已发 \(ble.sentFrameCount) 帧")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(ble.sentFrameCount > 0 ? .green : .red)
+                }
             }
             Spacer()
             Button {

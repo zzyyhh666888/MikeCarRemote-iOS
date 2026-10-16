@@ -40,6 +40,13 @@ final class BLEManager: NSObject, ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var rxByteCount: Int = 0
 
+    // 诊断信息（显示在界面上，用于判断数据是否走对了透传通道）
+    @Published private(set) var connectedDeviceName: String?
+    @Published private(set) var serviceUUIDs: [String] = []
+    @Published private(set) var txCharacteristicUUID: String?
+    @Published private(set) var rxCharacteristicUUID: String?
+    @Published private(set) var sentFrameCount: Int = 0
+
     // MARK: - 私有属性
 
     private var central: CBCentralManager!
@@ -53,21 +60,32 @@ final class BLEManager: NSObject, ObservableObject {
     private let savedPeripheralKey = "MikeCarRemote.savedPeripheralUUID"
     private var scanTimeoutWorkItem: DispatchWorkItem?
 
-    // 常见透传 GATT UUID
+    // 常见透传 GATT UUID（HM-10/HC-08/JDY/CH9141/DX-BT/BT04-BLE/NUS 等）
     private static let knownWriteUUIDs: Set<CBUUID> = [
         CBUUID(string: "FFE1"),
         CBUUID(string: "FFE2"),
+        CBUUID(string: "FFF1"),
+        CBUUID(string: "FFF2"),
+        CBUUID(string: "FF01"),
+        CBUUID(string: "FE61"),
         CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"),
-        CBUUID(string: "49535343-8841-43F4-A8D4-ECBE34729BB3")
+        CBUUID(string: "49535343-8841-43F4-A8D4-ECBE34729BB3"),
+        CBUUID(string: "0000FFE1-0000-1000-8000-00805F9B34FB")
     ]
     private static let knownNotifyUUIDs: Set<CBUUID> = [
         CBUUID(string: "FFE1"),
         CBUUID(string: "FFE4"),
+        CBUUID(string: "FFF1"),
+        CBUUID(string: "FFF4"),
+        CBUUID(string: "FF01"),
         CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"),
-        CBUUID(string: "49535343-1E4D-4BD9-BA61-23C647249616")
+        CBUUID(string: "49535343-1E4D-4BD9-BA61-23C647249616"),
+        CBUUID(string: "0000FFE1-0000-1000-8000-00805F9B34FB")
     ]
     private static let knownServiceUUIDs: [CBUUID] = [
         CBUUID(string: "FFE0"),
+        CBUUID(string: "FFF0"),
+        CBUUID(string: "00FF"),
         CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"),
         CBUUID(string: "49535343-1E4D-4BD9-BA61-23C647249616")
     ]
@@ -135,6 +153,11 @@ final class BLEManager: NSObject, ObservableObject {
         rxCharacteristic = nil
         notifyEnabled = false
         connectedName = nil
+        connectedDeviceName = nil
+        serviceUUIDs = []
+        txCharacteristicUUID = nil
+        rxCharacteristicUUID = nil
+        sentFrameCount = 0
         state = .disconnected
     }
 
@@ -155,6 +178,7 @@ final class BLEManager: NSObject, ObservableObject {
             peripheral.writeValue(data.subdata(in: index..<end), for: tx, type: writeType)
             index = end
         }
+        sentFrameCount += 1
     }
 
     // MARK: - 自动重连上次设备
@@ -183,38 +207,80 @@ final class BLEManager: NSObject, ObservableObject {
     // MARK: - 透传特征挑选
 
     fileprivate func resolveTransport(for peripheral: CBPeripheral) {
-        var allCharacteristics: [CBCharacteristic] = []
-        peripheral.services?.forEach { service in
-            if let chars = service.characteristics {
-                allCharacteristics.append(contentsOf: chars)
+        struct Candidate {
+            let service: CBService
+            let char: CBCharacteristic
+        }
+
+        let services = peripheral.services ?? []
+        var candidates: [Candidate] = []
+        for service in services {
+            for char in service.characteristics ?? [] {
+                candidates.append(Candidate(service: service, char: char))
             }
         }
 
-        let writable = allCharacteristics.filter {
-            $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)
+        func writable(_ c: CBCharacteristic) -> Bool {
+            c.properties.contains(.write) || c.properties.contains(.writeWithoutResponse)
         }
-        let notifiable = allCharacteristics.filter {
-            $0.properties.contains(.notify) || $0.properties.contains(.indicate)
+        func notifiable(_ c: CBCharacteristic) -> Bool {
+            c.properties.contains(.notify) || c.properties.contains(.indicate)
+        }
+        // OTA / DFU 升级服务不是透传通道，必须排除（选错会导致能连上但控制完全无效）
+        func likelyUpgradeService(_ s: CBService) -> Bool {
+            let id = s.uuid.uuidString.lowercased()
+            return id.contains("dfu") || id.contains("ota") || id.contains("firmware") || id.contains("upgrade")
         }
 
-        // 写特征：已知 UUID 优先；否则优先无响应写（适合高频遥控帧）
-        var tx = writable.first { Self.knownWriteUUIDs.contains($0.uuid) }
-        if tx == nil {
-            tx = writable.first { $0.properties.contains(.writeWithoutResponse) } ?? writable.first
+        let writeCandidates = candidates.filter {
+            writable($0.char) && !likelyUpgradeService($0.service)
         }
 
-        // 通知特征：已知 UUID 优先
-        let rx = notifiable.first { Self.knownNotifyUUIDs.contains($0.uuid) } ?? notifiable.first
+        // 打分挑出真正的透传写特征：
+        // 已知 UUID 100 分；同一特征同时可写+可通知（FFE1 型）+40；
+        // 同服务内有成对通知特征（NUS 型 RX/TX 分离）+20；支持无响应写 +5
+        func score(_ item: Candidate) -> Int {
+            var s = 0
+            if Self.knownWriteUUIDs.contains(item.char.uuid) { s += 100 }
+            if notifiable(item.char) { s += 40 }
+            let siblingNotify = (item.service.characteristics ?? []).contains {
+                $0.uuid != item.char.uuid && notifiable($0)
+            }
+            if siblingNotify { s += 20 }
+            if item.char.properties.contains(.writeWithoutResponse) { s += 5 }
+            return s
+        }
 
-        guard let writeChar = tx else {
+        guard let best = writeCandidates.max(by: { score($0) < score($1) }) else {
             lastError = "该设备没有可用的透传通道，请确认是 BLE 串口透传模块"
             disconnect()
             state = .disconnected
             return
         }
 
-        txCharacteristic = writeChar
+        // 接收（通知）特征：优先和写特征同特征，其次同服务内的，最后全局已知 UUID
+        var rx: CBCharacteristic?
+        if notifiable(best.char) {
+            rx = best.char
+        } else {
+            rx = (best.service.characteristics ?? []).first { notifiable($0) }
+            if rx == nil {
+                rx = candidates.first {
+                    notifiable($0.char) && Self.knownNotifyUUIDs.contains($0.char.uuid)
+                }?.char
+            }
+            if rx == nil {
+                rx = candidates.first { notifiable($0.char) }?.char
+            }
+        }
+
+        // 记录诊断信息
+        connectedDeviceName = peripheral.name
+        serviceUUIDs = services.map { $0.uuid.uuidString }
+        txCharacteristic = best.char
         rxCharacteristic = rx
+        txCharacteristicUUID = best.char.uuid.uuidString
+        rxCharacteristicUUID = rx?.uuid.uuidString
 
         if let rx {
             peripheral.setNotifyValue(true, for: rx)
