@@ -379,12 +379,16 @@ struct ContentView: View {
         }
 
         var f = ControlFrame()
-        // 左手摇杆（单轴）：左右=转向 ch0；上下不取，油门 ch1 恒为中位，旋转不会前后走
-        f.rudder   = ControlFrame.scaledSigned(leftBotX)
+        let turn = ControlFrame.scaledSigned(leftBotX)
+        // 左手摇杆（单轴）：ch0=转向；ch1 固定中位（该车固件中油门不参与行走）
+        f.rudder   = turn
         f.throttle = 0
-        // 右手摇杆：本机电机接线下 ch2(byte3)=前后、ch3(byte4)=横移，
-        // 因此摇杆垂直(前后)送 ch2，摇杆水平(横移)送 ch3。
-        f.aileron  = ControlFrame.scaledSigned(rightBotY)
+        // 右手摇杆：该车电机接线导致 ch2=前后、ch3=横移。
+        // 左手摇杆 ch0 在车固件中存在"转向量混入前后通道"的耦合，
+        // 在 ch2（前后）里反向叠加转向量做补偿，使原地旋转时前后净量为 0。
+        // 若实测仍有轻微前后移动/后退，可把补偿系数 1.0 调到 1.3 或 0.7。
+        let turnCompensation = turn // 补偿系数 = 1.0
+        f.aileron  = max(-128, min(127, ControlFrame.scaledSigned(rightBotY) - turnCompensation))
         f.elevator = ControlFrame.scaledSigned(rightBotX)
         // 中间摇杆：机械臂 X/Y = ch4/ch5
         f.armX     = ControlFrame.scaledSigned(centerX)
