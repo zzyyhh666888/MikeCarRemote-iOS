@@ -384,10 +384,14 @@ struct ContentView: View {
         f.rudder   = turn
         f.throttle = 0
         // 右手摇杆：该车电机接线导致 ch2=前后、ch3=横移。
-        // 左手摇杆 ch0 在车固件中存在"转向量混入前后通道"的耦合，
+        // 左手摇杆 ch0 在车固件中会产生"转向量混入前后通道"的耦合，
         // 在 ch2（前后）里反向叠加转向量做补偿，使原地旋转时前后净量为 0。
-        // 若实测仍有轻微前后移动/后退，可把补偿系数 1.0 调到 1.3 或 0.7。
-        let turnCompensation = turn // 补偿系数 = 1.0
+        // 补偿系数说明：
+        //   1.0 → 与转向量 1:1 抵消（理论值）
+        //   偏大（如 1.3）→ 原地旋转时略有前移
+        //   偏小（如 0.7）→ 原地旋转时略有后退
+        let turnCompensationFactor: Double = 1.0
+        let turnCompensation = Int(Double(turn) * turnCompensationFactor)
         f.aileron  = max(-128, min(127, ControlFrame.scaledSigned(rightBotY) - turnCompensation))
         f.elevator = ControlFrame.scaledSigned(rightBotX)
         // 中间摇杆：机械臂 X/Y = ch4/ch5
