@@ -19,7 +19,7 @@ struct ContentView: View {
     @StateObject private var ble = BLEManager()
     @Environment(\.scenePhase) private var scenePhase
 
-    // 三个摇杆：中=车体移动，左下=机械臂 XY，右下=横移·油门
+    // 三个摇杆：左下=左手(转向/油门)，中=机械臂(X/Y)，右下=右手(横移/前后)
     @State private var centerX = 0.0; @State private var centerY = 0.0
     @State private var leftBotX = 0.0; @State private var leftBotY = 0.0
     @State private var rightBotX = 0.0; @State private var rightBotY = 0.0
@@ -178,22 +178,23 @@ struct ContentView: View {
                 // SW1-SW8 开关面板（2x4 网格）
                 switchGrid
 
-                // 三个摇杆
+                // 三个摇杆（与 SayHi 一致）：
+                // 左下=左手摇杆(转向/油门)，顶部中=机械臂(X/Y)，右下=右手摇杆(横移/前后)
                 HStack(alignment: .bottom, spacing: 6) {
                     JoystickView(x: $leftBotX, y: $leftBotY,
-                                 title: "机械臂",
-                                 xAxisLabel: "X",
-                                 yAxisLabel: "Y",
+                                 title: "左手",
+                                 xAxisLabel: "转向",
+                                 yAxisLabel: "油门",
                                  enabled: ble.isReady && !emergency)
                     JoystickView(x: $centerX, y: $centerY,
-                                 title: "移动",
-                                 xAxisLabel: "转向",
-                                 yAxisLabel: "前后",
+                                 title: "机械臂",
+                                 xAxisLabel: "大臂左右",
+                                 yAxisLabel: "大臂前后",
                                  enabled: ble.isReady && !emergency)
                     JoystickView(x: $rightBotX, y: $rightBotY,
-                                 title: "横移",
+                                 title: "右手",
                                  xAxisLabel: "横移",
-                                 yAxisLabel: "油门",
+                                 yAxisLabel: "前后",
                                  enabled: ble.isReady && !emergency)
                 }
                 .padding(.horizontal, 4)
@@ -377,12 +378,15 @@ struct ContentView: View {
         }
 
         var f = ControlFrame()
-        f.rudder   = ControlFrame.scaledSigned(centerX)
-        f.elevator = ControlFrame.scaledSigned(centerY)
+        // 左手摇杆：左右=转向 ch0，上下=油门 ch1
+        f.rudder   = ControlFrame.scaledSigned(leftBotX)
+        f.throttle = ControlFrame.scaledSigned(leftBotY)
+        // 右手摇杆：左右=横移 ch2，上下=前后 ch3
         f.aileron  = ControlFrame.scaledSigned(rightBotX)
-        f.throttle = ControlFrame.scaledSigned(rightBotY)
-        f.armX     = ControlFrame.scaledSigned(leftBotX)
-        f.armY     = ControlFrame.scaledSigned(leftBotY)
+        f.elevator = ControlFrame.scaledSigned(rightBotY)
+        // 中间摇杆：机械臂 X/Y = ch4/ch5
+        f.armX     = ControlFrame.scaledSigned(centerX)
+        f.armY     = ControlFrame.scaledSigned(centerY)
         f.armZ     = ControlFrame.scaledSigned((wristZ - 0.5) * 2) // 0...1 -> -1...1
         f.claw     = clawValue
         f.switches = sw
