@@ -7,48 +7,20 @@
 //  帧结构:
 //  [0]    0xA5  帧头
 //  [1]    ch0  rudder   转向   (中点 128)
-//  [2]    ch1  throttle 油门   (中点 128，固件预留)
+//  [2]    ch1  throttle 油门   (中点 128)
 //  [3]    ch2  aileron  横移   (中点 128)
 //  [4]    ch3  elevator 前后   (中点 128)
 //  [5]    ch4  机械臂 X 增量   (中点 128)
 //  [6]    ch5  机械臂 Y 增量   (中点 128)
 //  [7]    ch6  机械臂腕部旋转  (中点 128)
 //  [8]    ch7  claw 夹爪       (0...255 绝对位置)
-//  [9]    开关位域 (bit0=sw0, bit1=sw1, bit3=sw3 安装模式)
+//  [9]    开关位域 (bit0=sw0/SW1避障, bit1=sw1/SW2自稳, bit2=sw2/SW3, bit3=sw3/SW4安装模式)
 //  [10]   保留 0x00
 //  [11]   校验和 = (byte1 + ... + byte10) & 0xFF
 //  [12]   0x5A  帧尾
 //
 
 import Foundation
-
-/// 驾驶模式，对应固件 my_usart.c 中 sw0/sw1 组合出的 m4mode
-enum DriveMode: Int, CaseIterable, Identifiable {
-    case manual        = 0  // m4mode 0: sw0=0 sw1=0 手动，无陀螺保持
-    case gyroHold      = 2  // m4mode 2: sw0=0 sw1=1 陀螺角度保持
-    case avoidance     = 4  // m4mode 4: sw0=1 sw1=0 避障
-    case holdAvoid     = 1  // m4mode 1: sw0=1 sw1=1 陀螺保持 + 避障
-
-    var id: Int { rawValue }
-
-    var swBits: UInt8 {
-        switch self {
-        case .manual:    return 0       // 00
-        case .gyroHold:  return 1 << 1  // 01
-        case .avoidance: return 1 << 0  // 10
-        case .holdAvoid: return (1 << 0) | (1 << 1) // 11
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .manual:    return "手动"
-        case .gyroHold:  return "陀螺保持"
-        case .avoidance: return "避障"
-        case .holdAvoid: return "保持+避障"
-        }
-    }
-}
 
 struct ControlFrame {
     // 有符号通道，范围 -128...127，0 为中点
@@ -91,7 +63,6 @@ struct ControlFrame {
 
         let signedChannels = [rudder, throttle, aileron, elevator, armX, armY, armZ]
         for (index, value) in signedChannels.enumerated() {
-            // 有符号 -128...127 映射到字节 0...255，128 为中点
             let clamped = max(-128, min(127, value))
             bytes[index + 1] = UInt8(clamped + 128)
         }
@@ -110,7 +81,7 @@ struct ControlFrame {
         return Data(bytes)
     }
 
-    /// 全部通道回中（夹爪保持为张开状态的中点值由调用方决定，这里给 0 仅用于校验）
+    /// 全部通道回中（夹爪保持为张开状态的中点值由调用方决定）
     static func idle(switches: UInt8 = 0, claw: Int = 128) -> ControlFrame {
         ControlFrame(claw: claw, switches: switches)
     }

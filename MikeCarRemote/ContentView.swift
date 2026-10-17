@@ -7,6 +7,14 @@
 
 import SwiftUI
 
+/// SW1-SW8 开关标签与字节位的对应（与固件 my_usart.c 的 sw[0..7] 一致）
+enum SwitchConfig {
+    static let labels: [String] = [
+        "SW1避障", "SW2自稳", "SW3", "SW4安装",
+        "SW5", "SW6", "SW7", "SW8",
+    ]
+}
+
 struct ContentView: View {
     @StateObject private var ble = BLEManager()
     @Environment(\.scenePhase) private var scenePhase
@@ -237,7 +245,7 @@ struct ContentView: View {
     }
 
     private func swButton(index: Int) -> some View {
-        let label = SwitchConfig.labels[index].name
+        let label = SwitchConfig.labels[index]
         let isOn = swStates[index]
         return Button {
             withAnimation(.easeInOut(duration: 0.15)) {
