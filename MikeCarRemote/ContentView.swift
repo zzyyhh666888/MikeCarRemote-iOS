@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  MikeCarRemote
 //
-//  麦轮工程小车 + 机械臂蓝牙遥控主界面。
+//  参考 SayHi.apk 布局：8 开关 + 3 摇杆 + 2 滑条
 //
 
 import SwiftUI
@@ -11,26 +11,22 @@ struct ContentView: View {
     @StateObject private var ble = BLEManager()
     @Environment(\.scenePhase) private var scenePhase
 
-    // 左摇杆：转向 / 前后；右摇杆：横移·油门 或 机械臂 X/Y
-    @State private var leftX = 0.0
-    @State private var leftY = 0.0
-    @State private var rightX = 0.0
-    @State private var rightY = 0.0
+    // 三个摇杆：中=车体移动，左下=机械臂 XY，右下=横移·油门
+    @State private var centerX = 0.0; @State private var centerY = 0.0
+    @State private var leftBotX = 0.0; @State private var leftBotY = 0.0
+    @State private var rightBotX = 0.0; @State private var rightBotY = 0.0
 
-    enum RightStickFunction: Int, CaseIterable {
-        case drive, arm
-        var label: String { self == .drive ? "麦轮移动" : "机械臂" }
-    }
-    @State private var rightFunction: RightStickFunction = .drive
+    // SW1-SW8 独立开关
+    @State private var swStates: [Bool] = Array(repeating: false, count: 8)
 
-    @State private var driveMode: DriveMode = .manual
-    @State private var installMode = false
-    @State private var wristZ = 0.0       // -1...1
-    @State private var claw: Double = 0.5 // 0...1
+    // 滑条
+    @State private var claw: Double = 0.0   // 0...1
+    @State private var wristZ: Double = 0.5 // 0...1 (映射到 0...255)
+
     @State private var emergency = false
     @State private var showScanner = false
 
-    // 40Hz 发送。13 字节 * 40 = 520 B/s，低于 9600 波特率上限，固件约 300ms 无帧即失控停车
+    // 40Hz 发送
     private let frameTimer = Timer.publish(every: 0.025, tolerance: 0.005,
                                            on: .main, in: .common).autoconnect()
 
@@ -60,8 +56,9 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { phase in
             if phase != .active {
-                // 进入后台/锁屏：立即发一帧中位帧，之后由固件失控保护停车
-                leftX = 0; leftY = 0; rightX = 0; rightY = 0; wristZ = 0
+                centerX = 0; centerY = 0
+                leftBotX = 0; leftBotY = 0
+                rightBotX = 0; rightBotY = 0
                 emergency = true
                 ble.send(makeFrame().encode())
             }
@@ -144,82 +141,57 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - 控制台
+    // MARK: - 控制台（参考 SayHi.apk 布局）
 
     private var consoleView: some View {
         ScrollView {
-            VStack(spacing: 18) {
+            VStack(spacing: 12) {
                 connectionBar
 
-                // 驾驶模式
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("驾驶模式").font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Picker("驾驶模式", selection: $driveMode) {
-                        ForEach(DriveMode.allCases) { mode in
-                            Text(mode.label).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(ble.state != .ready)
-
-                    Toggle("机械臂安装回中模式 (sw3)", isOn: $installMode)
-                        .font(.subheadline)
-                }
-                .padding()
-                .background(cardBackground)
-                .padding(.horizontal)
-
-                // 双摇杆
-                HStack(alignment: .bottom, spacing: 10) {
-                    JoystickView(x: $leftX, y: $leftY,
-                                 title: "左摇杆",
-                                 xAxisLabel: "转向",
-                                 yAxisLabel: "前进/后退",
-                                 enabled: ble.isReady)
+                // 标题
+                HStack {
+                    Image(systemName: "car.fill")
+                        .foregroundStyle(.tint)
+                    Text("麦轮小车遥控")
+                        .font(.headline)
                     Spacer()
-                    JoystickView(x: $rightX, y: $rightY,
-                                 title: "右摇杆（\(rightFunction.label)）",
-                                 xAxisLabel: rightFunction == .drive ? "横移" : "大臂左右",
-                                 yAxisLabel: rightFunction == .drive ? "油门(预留)" : "大臂前后",
-                                 enabled: ble.isReady)
-                        .id(rightFunction)
-                }
-                .padding(.horizontal, 8)
-
-                Picker("右摇杆功能", selection: $rightFunction) {
-                    ForEach(RightStickFunction.allCases, id: \.self) { fn in
-                        Text(fn.label).tag(fn)
+                    if let name = ble.connectedName {
+                        HStack(spacing: 4) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.caption2)
+                            Text(name)
+                                .font(.caption)
+                        }
+                        .foregroundStyle(.secondary)
                     }
                 }
-                .pickerStyle(.segmented)
                 .padding(.horizontal)
-                .onChange(of: rightFunction) { _ in
-                    rightX = 0; rightY = 0
-                }
 
-                // 腕部与夹爪
-                VStack(spacing: 14) {
-                    HStack(spacing: 10) {
-                        Text("腕转").font(.subheadline).frame(width: 34, alignment: .leading)
-                        Slider(value: $wristZ, in: -1...1)
-                            .disabled(!ble.isReady)
-                        Button("回中") { withAnimation { wristZ = 0 } }
-                            .buttonStyle(.bordered).controlSize(.small)
-                    }
-                    HStack(spacing: 10) {
-                        Text("夹爪").font(.subheadline).frame(width: 34, alignment: .leading)
-                        Slider(value: $claw, in: 0...1)
-                            .disabled(!ble.isReady)
-                        Button("张开") { withAnimation { claw = 0 } }
-                            .buttonStyle(.bordered).controlSize(.small)
-                        Button("闭合") { withAnimation { claw = 1 } }
-                            .buttonStyle(.bordered).controlSize(.small)
-                    }
+                // SW1-SW8 开关面板（2x4 网格）
+                switchGrid
+
+                // 三个摇杆
+                HStack(alignment: .bottom, spacing: 6) {
+                    JoystickView(x: $leftBotX, y: $leftBotY,
+                                 title: "机械臂",
+                                 xAxisLabel: "X",
+                                 yAxisLabel: "Y",
+                                 enabled: ble.isReady && !emergency)
+                    JoystickView(x: $centerX, y: $centerY,
+                                 title: "移动",
+                                 xAxisLabel: "转向",
+                                 yAxisLabel: "前后",
+                                 enabled: ble.isReady && !emergency)
+                    JoystickView(x: $rightBotX, y: $rightBotY,
+                                 title: "横移",
+                                 xAxisLabel: "横移",
+                                 yAxisLabel: "油门",
+                                 enabled: ble.isReady && !emergency)
                 }
-                .padding()
-                .background(cardBackground)
-                .padding(.horizontal)
+                .padding(.horizontal, 4)
+
+                // 滑条区（夹爪 + 腕转）
+                slidersCard
 
                 // 急停
                 Button {
@@ -240,6 +212,88 @@ struct ContentView: View {
             }
             .padding(.vertical)
         }
+    }
+
+    // MARK: - 开关网格（SayHi 风格：SW1-SW8）
+
+    private var switchGrid: some View {
+        VStack(spacing: 6) {
+            // 上半行 SW1-SW4
+            HStack(spacing: 6) {
+                ForEach(0..<4) { i in
+                    swButton(index: i)
+                }
+            }
+            // 下半行 SW5-SW8
+            HStack(spacing: 6) {
+                ForEach(4..<8) { i in
+                    swButton(index: i)
+                }
+            }
+        }
+        .padding(8)
+        .background(cardBackground)
+        .padding(.horizontal)
+    }
+
+    private func swButton(index: Int) -> some View {
+        let label = SwitchConfig.labels[index].name
+        let isOn = swStates[index]
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                swStates[index].toggle()
+            }
+        } label: {
+            Text(label)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .foregroundStyle(isOn ? Color.white : Color.primary)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isOn ? Color.accentColor : Color(.tertiarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isOn ? Color.accentColor : Color(.systemGray4), lineWidth: 1)
+                )
+        }
+        .disabled(!ble.isReady)
+        .buttonStyle(.plain)
+    }
+
+    private var slidersCard: some View {
+        VStack(spacing: 12) {
+            // 夹爪
+            HStack(spacing: 8) {
+                Text("夹爪")
+                    .font(.subheadline)
+                    .frame(width: 36, alignment: .leading)
+                Slider(value: $claw, in: 0...1)
+                    .disabled(!ble.isReady)
+                HStack(spacing: 4) {
+                    Button("张开") { withAnimation { claw = 0 } }
+                        .buttonStyle(.bordered).controlSize(.mini)
+                    Button("闭合") { withAnimation { claw = 1 } }
+                        .buttonStyle(.bordered).controlSize(.mini)
+                }
+            }
+            // 腕转
+            HStack(spacing: 8) {
+                Text("腕转")
+                    .font(.subheadline)
+                    .frame(width: 36, alignment: .leading)
+                Slider(value: $wristZ, in: 0...1)
+                    .disabled(!ble.isReady)
+                Button("回中") { withAnimation { wristZ = 0.5 } }
+                    .buttonStyle(.bordered).controlSize(.mini)
+            }
+        }
+        .padding()
+        .background(cardBackground)
+        .padding(.horizontal)
     }
 
     private var cardBackground: some View {
@@ -302,14 +356,12 @@ struct ContentView: View {
 
     // MARK: - 帧组装与动作
 
-    private func currentSwitches() -> UInt8 {
-        var sw = driveMode.swBits
-        if installMode { sw |= 0x08 } // sw3
-        return sw
-    }
-
     private func makeFrame() -> ControlFrame {
-        let sw = currentSwitches()
+        var sw: UInt8 = 0
+        for i in 0..<8 {
+            if swStates[i] { sw |= (1 << i) }
+        }
+
         let clawValue = ControlFrame.scaledClaw(claw)
 
         if emergency {
@@ -317,18 +369,14 @@ struct ContentView: View {
         }
 
         var f = ControlFrame()
-        f.rudder = ControlFrame.scaledSigned(leftX)
-        f.elevator = ControlFrame.scaledSigned(leftY)
-
-        if rightFunction == .drive {
-            f.aileron = ControlFrame.scaledSigned(rightX)
-            f.throttle = ControlFrame.scaledSigned(rightY)
-        } else {
-            f.armX = ControlFrame.scaledSigned(rightX)
-            f.armY = ControlFrame.scaledSigned(rightY)
-        }
-        f.armZ = ControlFrame.scaledSigned(wristZ)
-        f.claw = clawValue
+        f.rudder   = ControlFrame.scaledSigned(centerX)
+        f.elevator = ControlFrame.scaledSigned(centerY)
+        f.aileron  = ControlFrame.scaledSigned(rightBotX)
+        f.throttle = ControlFrame.scaledSigned(rightBotY)
+        f.armX     = ControlFrame.scaledSigned(leftBotX)
+        f.armY     = ControlFrame.scaledSigned(leftBotY)
+        f.armZ     = ControlFrame.scaledSigned((wristZ - 0.5) * 2) // 0...1 -> -1...1
+        f.claw     = clawValue
         f.switches = sw
         return f
     }
@@ -336,9 +384,9 @@ struct ContentView: View {
     private func toggleEmergency() {
         emergency.toggle()
         if emergency {
-            leftX = 0; leftY = 0
-            rightX = 0; rightY = 0
-            wristZ = 0
+            centerX = 0; centerY = 0
+            leftBotX = 0; leftBotY = 0
+            rightBotX = 0; rightBotY = 0
         }
     }
 }
