@@ -179,13 +179,14 @@ struct ContentView: View {
                 switchGrid
 
                 // 三个摇杆（与 SayHi 一致）：
-                // 左下=左手摇杆(转向/油门)，顶部中=机械臂(X/Y)，右下=右手摇杆(横移/前后)
+                // 左下=左手(仅转向/单轴)，顶部中=机械臂(X/Y)，右下=右手(横移/前后)
                 HStack(alignment: .bottom, spacing: 6) {
                     JoystickView(x: $leftBotX, y: $leftBotY,
                                  title: "左手",
                                  xAxisLabel: "转向",
-                                 yAxisLabel: "油门",
-                                 enabled: ble.isReady && !emergency)
+                                 yAxisLabel: "",
+                                 enabled: ble.isReady && !emergency,
+                                 lockHorizontal: true)
                     JoystickView(x: $centerX, y: $centerY,
                                  title: "机械臂",
                                  xAxisLabel: "大臂左右",
@@ -378,12 +379,12 @@ struct ContentView: View {
         }
 
         var f = ControlFrame()
-        // 左手摇杆：左右=转向 ch0，上下=油门 ch1
+        // 左手摇杆（单轴）：左右=转向 ch0；上下不取，油门 ch1 恒为中位，旋转不会前后走
         f.rudder   = ControlFrame.scaledSigned(leftBotX)
-        f.throttle = ControlFrame.scaledSigned(leftBotY)
-        // 右手摇杆：左右=横移 ch2，上下=前后 ch3
-        f.aileron  = ControlFrame.scaledSigned(rightBotX)
-        f.elevator = ControlFrame.scaledSigned(rightBotY)
+        f.throttle = 0
+        // 右手摇杆：左右=横移 ch2，上下=前后 ch3（方向取反，使上推=前进、右推=右横移）
+        f.aileron  = -ControlFrame.scaledSigned(rightBotX)
+        f.elevator = -ControlFrame.scaledSigned(rightBotY)
         // 中间摇杆：机械臂 X/Y = ch4/ch5
         f.armX     = ControlFrame.scaledSigned(centerX)
         f.armY     = ControlFrame.scaledSigned(centerY)

@@ -16,6 +16,8 @@ struct JoystickView: View {
     let xAxisLabel: String
     let yAxisLabel: String
     var enabled: Bool = true
+    /// 锁定为单轴摇杆：仅水平移动（如左手摇杆只负责转向）
+    var lockHorizontal: Bool = false
     var onReset: (() -> Void)? = nil
 
     private let baseSize: CGFloat = 150
@@ -41,22 +43,24 @@ struct JoystickView: View {
                             .strokeBorder(Color(.systemGray3), lineWidth: 1)
                     )
 
-                // 十字参考线
+                // 十字参考线（单轴模式只保留对应方向）
                 Group {
                     Rectangle()
                         .fill(Color(.systemGray3))
                         .frame(width: 1.5, height: baseSize - 18)
+                        .opacity(lockHorizontal ? 0 : 0.6)
                     Rectangle()
                         .fill(Color(.systemGray3))
                         .frame(width: baseSize - 18, height: 1.5)
+                        .opacity(0.6)
                 }
-                .opacity(0.6)
 
                 // 方向箭头提示
                 Image(systemName: "arrowtriangle.up.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(Color(.systemGray2))
                     .offset(y: -baseSize / 2 + 16)
+                    .opacity(lockHorizontal ? 0 : 1)
 
                 // 摇杆头
                 Circle()
@@ -76,7 +80,9 @@ struct JoystickView: View {
 
             HStack(spacing: 12) {
                 Text("↔ \(xAxisLabel)")
-                Text("↕ \(yAxisLabel)")
+                if !yAxisLabel.isEmpty && !lockHorizontal {
+                    Text("↕ \(yAxisLabel)")
+                }
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -99,6 +105,9 @@ struct JoystickView: View {
         var dx = value.translation.width
         var dy = -value.translation.height
 
+        // 单轴（水平）锁定：忽略垂直分量，摇杆只能左右推
+        if lockHorizontal { dy = 0 }
+
         let distance = sqrt(dx * dx + dy * dy)
         if distance > travelRadius {
             let scale = travelRadius / distance
@@ -108,7 +117,7 @@ struct JoystickView: View {
 
         knobOffset = CGSize(width: dx, height: -dy)
         x = Double(dx / travelRadius)
-        y = Double(dy / travelRadius)
+        y = lockHorizontal ? 0 : Double(dy / travelRadius)
     }
 
     private func handleRelease() {
