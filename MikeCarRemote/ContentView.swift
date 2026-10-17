@@ -372,7 +372,7 @@ struct ContentView: View {
             if swStates[i] { sw |= (1 << i) }
         }
 
-        let clawValue = ControlFrame.scaledClaw(1 - claw)
+        let clawValue = ControlFrame.scaledClaw(claw)
 
         if emergency {
             return ControlFrame(claw: clawValue, switches: sw)
