@@ -284,9 +284,9 @@ struct ContentView: View {
                 Slider(value: $claw, in: 0...1)
                     .disabled(!ble.isReady)
                 HStack(spacing: 4) {
-                    Button("张开") { withAnimation { claw = 0 } }
+                    Button("张开") { withAnimation { claw = 1 } }
                         .buttonStyle(.bordered).controlSize(.mini)
-                    Button("闭合") { withAnimation { claw = 1 } }
+                    Button("闭合") { withAnimation { claw = 0 } }
                         .buttonStyle(.bordered).controlSize(.mini)
                 }
             }
@@ -372,23 +372,35 @@ struct ContentView: View {
             if swStates[i] { sw |= (1 << i) }
         }
 
-        let clawValue = ControlFrame.scaledClaw(claw)
+        let clawValue = ControlFrame.scaledClaw(1 - claw)
 
         if emergency {
             return ControlFrame(claw: clawValue, switches: sw)
         }
 
         var f = ControlFrame()
-        let turn = ControlFrame.scaledSigned(leftBotX)
         // 左手摇杆（单轴）：ch0=转向；ch1 固定中位（该车固件中油门不参与行走）
+        // 转向方向：左推=左转、右推=右转（电机对调后已验证）
+        var turn = ControlFrame.scaledSigned(leftBotX)
+        // 右手摇杆：该车电机接线导致 ch2=前后、ch3=横移。
+        var fwd  = ControlFrame.scaledSigned(rightBotY)
+        var lat  = ControlFrame.scaledSigned(rightBotX)
+        // 预限幅：固件混控为 motor = ±30*ch2 ±20*ch3 ±20*ch0（Turn_Pwm=20*rudder），
+        // 而固件 PWM_Limiting 有 bug（motor3/motor4 超限时会改写 motor2 的值和符号），
+        // 任一电机 |值| 超过 ±3199 就会触发。这里按固件公式预先估算最大负载，
+        // 超限时把三个通道整体等比缩小，保证任何摇杆组合都不触发该 bug。
+        // 注意：仅覆盖开环模式；SW2自稳闭环的 Turn_Pwm 由固件 PD 自算，不受此限。
+        let load = 30 * abs(fwd) + 20 * abs(lat) + 20 * abs(turn)
+        if load > 3199 {
+            let s = 3199.0 / Double(load)
+            fwd  = Int((Double(fwd)  * s).rounded())
+            lat  = Int((Double(lat)  * s).rounded())
+            turn = Int((Double(turn) * s).rounded())
+        }
         f.rudder   = turn
         f.throttle = 0
-        // 右手摇杆：该车电机接线导致 ch2=前后、ch3=横移。
-        // 注意：固件 PWM_Limiting 曾有限幅写错变量的 bug（已修），
-        // 之前观察到的"转向时后轮更快/往后拽"是 App 补偿把指令推进饱和区
-        // 触发该 bug 所致，纯转向指令(±2540)不会饱和，无需任何补偿。
-        f.aileron  = ControlFrame.scaledSigned(rightBotY)
-        f.elevator = ControlFrame.scaledSigned(rightBotX)
+        f.aileron  = fwd
+        f.elevator = lat
         // 中间摇杆：机械臂 X/Y = ch4/ch5
         f.armX     = ControlFrame.scaledSigned(centerX)
         f.armY     = ControlFrame.scaledSigned(centerY)
