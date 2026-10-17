@@ -354,7 +354,7 @@ struct ContentView: View {
     private var channelMonitor: some View {
         let f = makeFrame()
         return VStack(spacing: 4) {
-            Text(String(format: "转向 %d   横移 %d   前后 %d   油门 %d",
+            Text(String(format: "转向 %d   前后 %d   横移 %d   油门 %d",
                         f.rudder, f.aileron, f.elevator, f.throttle))
             Text(String(format: "臂X %d   臂Y %d   腕转 %d   夹爪 %d   SW 0x%02X",
                         f.armX, f.armY, f.armZ, f.claw, Int(f.switches)))
@@ -382,9 +382,10 @@ struct ContentView: View {
         // 左手摇杆（单轴）：左右=转向 ch0；上下不取，油门 ch1 恒为中位，旋转不会前后走
         f.rudder   = ControlFrame.scaledSigned(leftBotX)
         f.throttle = 0
-        // 右手摇杆：左右=横移 ch2，上下=前后 ch3（方向取反，使上推=前进、右推=右横移）
-        f.aileron  = -ControlFrame.scaledSigned(rightBotX)
-        f.elevator = -ControlFrame.scaledSigned(rightBotY)
+        // 右手摇杆：本机电机接线下 ch2(byte3)=前后、ch3(byte4)=横移，
+        // 因此摇杆垂直(前后)送 ch2，摇杆水平(横移)送 ch3。
+        f.aileron  = ControlFrame.scaledSigned(rightBotY)
+        f.elevator = ControlFrame.scaledSigned(rightBotX)
         // 中间摇杆：机械臂 X/Y = ch4/ch5
         f.armX     = ControlFrame.scaledSigned(centerX)
         f.armY     = ControlFrame.scaledSigned(centerY)
