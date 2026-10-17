@@ -379,24 +379,28 @@ struct ContentView: View {
         }
 
         var f = ControlFrame()
-        let turn = ControlFrame.scaledSigned(leftBotX)
         // 左手摇杆（单轴）：ch0=转向；ch1 固定中位（该车固件中油门不参与行走）
+        // 转向方向：左推=左转、右推=右转（电机对调后已验证）
+        var turn = ControlFrame.scaledSigned(leftBotX)
+        // 右手摇杆：该车电机接线导致 ch2=前后、ch3=横移。
+        var fwd  = ControlFrame.scaledSigned(rightBotY)
+        var lat  = ControlFrame.scaledSigned(rightBotX)
+        // 预限幅：固件混控为 motor = ±30*ch2 ±20*ch3 ±20*ch0（Turn_Pwm=20*rudder），
+        // 而固件 PWM_Limiting 有 bug（motor3/motor4 超限时会改写 motor2 的值和符号），
+        // 任一电机 |值| 超过 ±3199 就会触发。这里按固件公式预先估算最大负载，
+        // 超限时把三个通道整体等比缩小，保证任何摇杆组合都不触发该 bug。
+        // 注意：仅覆盖开环模式；SW2自稳闭环的 Turn_Pwm 由固件 PD 自算，不受此限。
+        let load = 30 * abs(fwd) + 20 * abs(lat) + 20 * abs(turn)
+        if load > 3199 {
+            let s = 3199.0 / Double(load)
+            fwd  = Int((Double(fwd)  * s).rounded())
+            lat  = Int((Double(lat)  * s).rounded())
+            turn = Int((Double(turn) * s).rounded())
+        }
         f.rudder   = turn
         f.throttle = 0
-        // 右手摇杆：该车电机接线导致 ch2=前后、ch3=横移。
-        // 左手摇杆 ch0 在车固件中会产生"转向量混入前后通道"的耦合，
-        // 在 ch2（前后）里反向叠加转向量做补偿，使原地旋转时前后净量为 0。
-        // 转向平移耦合补偿：本车实测转向(ch0)除旋转外还混入前后平移，
-        // 且后轮偏快（两个转向方向都往后）。平移分量 = 方向相关项 + 方向无关项，
-        // 用前后通道(ch2)反向抵消：
-        //   turnLinearFactor 抵消"与转向方向成正比"的分量
-        //   turnBiasFactor   抵消"与转向大小成正比、与方向无关（恒向后）"的分量
-        let turnLinearFactor: Double = 1.0
-        let turnBiasFactor: Double = 0.5
-        let linearComp = Int(Double(turn) * turnLinearFactor)
-        let biasComp = Int(Double(abs(turn)) * turnBiasFactor)
-        f.aileron  = max(-128, min(127, ControlFrame.scaledSigned(rightBotY) - linearComp + biasComp))
-        f.elevator = ControlFrame.scaledSigned(rightBotX)
+        f.aileron  = fwd
+        f.elevator = lat
         // 中间摇杆：机械臂 X/Y = ch4/ch5
         f.armX     = ControlFrame.scaledSigned(centerX)
         f.armY     = ControlFrame.scaledSigned(centerY)
